@@ -17,10 +17,21 @@ export async function getWorkflowRun(input: GetWorkflowRunInput) {
   return withPage(async (page) => {
     const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     if (resp && resp.status() === 404) throw new Error(`Workflow run ${input.runId} not found in ${input.repo}.`);
-    await page.waitForFunction(
-      () => !!document.querySelector('main h1, [class*="ActionListItem"], [data-testid="action-job"]'),
-      { timeout: 20000 },
-    ).catch(() => {});
+    // Wait for the actual status icons to render inside the job rows — these load AFTER the names.
+    await page
+      .waitForFunction(
+        () =>
+          !!document.querySelector(
+            'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-x-circle-fill, ' +
+              'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-check-circle-fill, ' +
+              'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-clock, ' +
+              'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-skip, ' +
+              'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-stop, ' +
+              'a[href*="/job/"] [class*="LeadingVisual"] svg.octicon-dot-fill',
+          ),
+        { timeout: 20000 },
+      )
+      .catch(() => {});
 
     const data = await page.evaluate(() => {
       function txt(el: Element | null) { return (el?.textContent ?? '').replace(/\s+/g, ' ').trim(); }
@@ -49,15 +60,16 @@ export async function getWorkflowRun(input: GetWorkflowRunInput) {
       const title = txt(document.querySelector('main h1'));
       const bodyText = document.body.innerText || '';
 
-      // Run-level status: find the first status-style octicon near the top of the page (not deep in the jobs sidebar).
-      // The summary area contains a large status icon.
+      // Run-level status: pick the first status octicon that has a color-fg-* class.
+      // These are the real status indicators — plain `octicon-x-circle-fill` is also reused for unrelated buttons.
       let status = 'unknown';
-      const summaryEl = document.querySelector('.actions-workflow-stats, [aria-label="Workflow run summary"]');
-      const summaryIcon = (summaryEl || document).querySelector(
-        'svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-stop, svg.octicon-skip, svg.octicon-clock, svg.octicon-dot-fill',
+      const statusIcons = Array.from(
+        document.querySelectorAll(
+          'svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-stop, svg.octicon-skip, svg.octicon-clock, svg.octicon-dot-fill',
+        ),
       );
-      if (summaryIcon) status = statusFromIcon(summaryIcon);
-      // Fall back to body text if no icon located.
+      const realRunIcon = statusIcons.find((s) => /color-fg-/.test(svgClasses(s)));
+      if (realRunIcon) status = statusFromIcon(realRunIcon);
       if (status === 'unknown') {
         if (/\bsuccessful\b/i.test(bodyText)) status = 'success';
         else if (/\b(failed?|failing)\b/i.test(bodyText)) status = 'failure';
@@ -84,8 +96,16 @@ export async function getWorkflowRun(input: GetWorkflowRunInput) {
         seenJobs.add(jobId);
         const jobName = txt(a) || null;
         const jobRow = a.closest('li, div[class*="ActionList"], li[class*="ActionListItem"]') as HTMLElement | null;
-        // Job status icon: first status octicon inside the row.
-        const statusSvg = jobRow?.querySelector('svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-skip, svg.octicon-dot-fill, svg.octicon-clock, svg.octicon-stop') ?? null;
+        // Job status icon is inside the LeadingVisual span of the ActionListItem.
+        const statusSvg =
+          jobRow?.querySelector(
+            '[class*="LeadingVisual"] svg.octicon-check-circle-fill, ' +
+              '[class*="LeadingVisual"] svg.octicon-x-circle-fill, ' +
+              '[class*="LeadingVisual"] svg.octicon-skip, ' +
+              '[class*="LeadingVisual"] svg.octicon-dot-fill, ' +
+              '[class*="LeadingVisual"] svg.octicon-clock, ' +
+              '[class*="LeadingVisual"] svg.octicon-stop',
+          ) ?? null;
         const jobStatus = statusFromIcon(statusSvg);
         // Clean URL — strip the #step anchor.
         const cleanHref = href.replace(/#step:.*$/, '');
