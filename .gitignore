@@ -1,5 +1,8 @@
 node_modules/
 dist/
 .playwright-profile/
+debug-out/
+debug-*.mjs
+.serena/
 *.log
 .DS_Store

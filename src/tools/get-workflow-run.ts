@@ -25,17 +25,45 @@ export async function getWorkflowRun(input: GetWorkflowRunInput) {
     const data = await page.evaluate(() => {
       function txt(el: Element | null) { return (el?.textContent ?? '').replace(/\s+/g, ' ').trim(); }
 
+      // Helper: read SVG class via getAttribute (SVG.className is SVGAnimatedString, not a string).
+      function svgClasses(el: Element | null): string {
+        return el?.getAttribute?.('class') ?? '';
+      }
+      function statusFromIcon(el: Element | null): string {
+        const cls = svgClasses(el);
+        if (/check-circle-fill/.test(cls)) return 'success';
+        if (/x-circle-fill/.test(cls)) return 'failure';
+        if (/stop/.test(cls)) return 'cancelled';
+        if (/octicon-skip/.test(cls)) return 'skipped';
+        if (/clock|dot-fill|hourglass|sync/.test(cls)) return 'in_progress';
+        const aria = el?.getAttribute?.('aria-label') || '';
+        if (/success/i.test(aria)) return 'success';
+        if (/^failed?\b|^fail/i.test(aria)) return 'failure';
+        if (/cancel/i.test(aria)) return 'cancelled';
+        if (/skip/i.test(aria)) return 'skipped';
+        if (/in.progress|running|queued|pending/i.test(aria)) return 'in_progress';
+        return 'unknown';
+      }
+
       // Title: usually the workflow name or first commit title.
       const title = txt(document.querySelector('main h1'));
-      // Status header text
       const bodyText = document.body.innerText || '';
+
+      // Run-level status: find the first status-style octicon near the top of the page (not deep in the jobs sidebar).
+      // The summary area contains a large status icon.
       let status = 'unknown';
-      const statusEl = document.querySelector('[aria-label*="Workflow run" i], [data-testid="run-status"]');
-      const aria = statusEl?.getAttribute('aria-label') || '';
-      if (/success/i.test(aria)) status = 'success';
-      else if (/fail/i.test(aria) || /error/i.test(aria)) status = 'failure';
-      else if (/cancel/i.test(aria)) status = 'cancelled';
-      else if (/in.progress|running|queued/i.test(aria)) status = 'in_progress';
+      const summaryEl = document.querySelector('.actions-workflow-stats, [aria-label="Workflow run summary"]');
+      const summaryIcon = (summaryEl || document).querySelector(
+        'svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-stop, svg.octicon-skip, svg.octicon-clock, svg.octicon-dot-fill',
+      );
+      if (summaryIcon) status = statusFromIcon(summaryIcon);
+      // Fall back to body text if no icon located.
+      if (status === 'unknown') {
+        if (/\bsuccessful\b/i.test(bodyText)) status = 'success';
+        else if (/\b(failed?|failing)\b/i.test(bodyText)) status = 'failure';
+        else if (/\bcancelled\b/i.test(bodyText)) status = 'cancelled';
+        else if (/\b(in progress|running|queued)\b/i.test(bodyText)) status = 'in_progress';
+      }
 
       // Trigger info from sidebar
       const triggerMatch = bodyText.match(/Triggered (?:via|by)\s+([\w-]+)/i);
@@ -56,18 +84,9 @@ export async function getWorkflowRun(input: GetWorkflowRunInput) {
         seenJobs.add(jobId);
         const jobName = txt(a) || null;
         const jobRow = a.closest('li, div[class*="ActionList"], li[class*="ActionListItem"]') as HTMLElement | null;
-        // Look for any svg with octicon class indicating status, or aria-label containing status keyword.
-        let jobStatus = 'unknown';
-        const statusSvg = jobRow?.querySelector('svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-skip, svg.octicon-dot-fill, svg.octicon-clock, svg.octicon-stop, svg[class*="octicon"][aria-label]');
-        if (statusSvg) {
-          const aria = statusSvg.getAttribute('aria-label') || '';
-          const cl = statusSvg.classList.toString();
-          if (/success/i.test(aria) || /check-circle-fill/.test(cl)) jobStatus = 'success';
-          else if (/fail/i.test(aria) || /x-circle-fill/.test(cl)) jobStatus = 'failure';
-          else if (/cancel/i.test(aria) || /stop/.test(cl)) jobStatus = 'cancelled';
-          else if (/skip/i.test(aria) || /octicon-skip/.test(cl)) jobStatus = 'skipped';
-          else if (/in.progress|running|queued/i.test(aria) || /clock|dot-fill/.test(cl)) jobStatus = 'in_progress';
-        }
+        // Job status icon: first status octicon inside the row.
+        const statusSvg = jobRow?.querySelector('svg.octicon-check-circle-fill, svg.octicon-x-circle-fill, svg.octicon-skip, svg.octicon-dot-fill, svg.octicon-clock, svg.octicon-stop') ?? null;
+        const jobStatus = statusFromIcon(statusSvg);
         // Clean URL — strip the #step anchor.
         const cleanHref = href.replace(/#step:.*$/, '');
         jobs.push({
