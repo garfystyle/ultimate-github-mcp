@@ -1,0 +1,25 @@
+{
+  "name": "ultimate-github-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for GitHub via web UI (no API rate limits, full search results)",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ultimate-github-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "login": "node dist/login.js",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "playwright": "^1.49.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
