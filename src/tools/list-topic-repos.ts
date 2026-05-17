@@ -44,15 +44,17 @@ export async function listTopicRepos(input: ListTopicReposInput) {
         if (!repo || seen.has(repo)) return;
         seen.add(repo);
 
-        // Description: <p> in card with content (skip language indicators)
+        // Description: <p> in card with content (skip language indicators and error placeholders)
         let description: string | null = null;
         const ps = card.querySelectorAll('p, div.f6');
         for (const p of Array.from(ps)) {
           const t = txt(p);
-          if (t && t.length > 15 && t.length < 600 && !/^\s*\d+(\.\d+)?[kmb]?\s*$/i.test(t)) {
-            description = t;
-            break;
-          }
+          if (!t) continue;
+          if (t.length < 15 || t.length > 600) continue;
+          if (/^\s*\d+(\.\d+)?[kmb]?\s*$/i.test(t)) continue;
+          if (/error while loading|please reload this page|something went wrong/i.test(t)) continue;
+          description = t;
+          break;
         }
 
         const language = txt(card.querySelector('[itemprop="programmingLanguage"], span[itemprop="programmingLanguage"]')) || null;
